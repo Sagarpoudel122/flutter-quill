@@ -1522,9 +1522,9 @@ class QuillRawEditorState extends EditorState
     // toolbar: copy, paste, select, cut. It might also provide additional
     // functionality depending on the browser (such as translate). Due to this
     // we should not show a Flutter toolbar for the editable text elements.
-    if (isWeb()) {
-      return false;
-    }
+    // if (isWeb()) {
+    //   return false;
+    // }
 
     // selectionOverlay is aggressively released when selection is collapsed
     // to remove unnecessary handles. Since a toolbar is requested here,

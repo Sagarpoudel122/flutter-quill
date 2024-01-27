@@ -9,6 +9,9 @@ import 'package:flutter/scheduler.dart';
 import '../../models/documents/nodes/node.dart';
 import '../editor/editor.dart';
 
+Offset? selectionOffsetStart;
+Offset? selectionOffsetEnd;
+
 TextSelection localSelection(Node node, TextSelection selection, fromParent) {
   final base = fromParent ? node.offset : node.documentOffset;
   assert(base <= selection.end && selection.start <= base + node.length - 1);
@@ -216,9 +219,66 @@ class EditorTextSelectionOverlay {
   void showToolbar() {
     assert(toolbar == null);
     if (contextMenuBuilder == null) return;
-    toolbar = OverlayEntry(builder: (context) {
-      return contextMenuBuilder!(context);
-    });
+
+    toolbar = OverlayEntry(
+      builder: (context) {
+        // return contextMenuBuilder!(context);
+        const toolbarWidth = 600.0;
+        const minToolbarX = 100.0;
+
+        var left = selectionOffsetStart?.dx ?? 100.0;
+        final top = (selectionOffsetEnd ?? selectionOffsetStart)?.dy ?? 0;
+
+        const toolbarHeight = 40.0;
+        final toolbarY = top + 15;
+        final end = left + toolbarWidth;
+
+        final screenWidth = renderObject.size.width;
+
+        // if (screenWidth > 790) {}
+        // If the toolbar exceeds the screen width, move it to the left
+        if (end > screenWidth) {
+          left -= end - screenWidth;
+          // left = left.clamp(minToolbarX, screenWidth - toolbarWidth);
+          final positionXMax = screenWidth - toolbarWidth;
+          // appPrint(screenWidth);
+          if (positionXMax > 99) {
+            left = left.clamp(minToolbarX, positionXMax);
+          } else {
+            left = MediaQuery.of(context).size.width - toolbarWidth;
+          }
+        }
+
+        final toolbarOffset = Offset(left, toolbarY);
+
+        final toolbarRect = Rect.fromLTWH(
+          toolbarOffset.dx,
+          toolbarOffset.dy,
+          toolbarWidth,
+          toolbarHeight,
+        );
+
+        return Positioned.fromRect(
+          rect: toolbarRect,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: Material(
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
+              child: Center(
+                child: contextMenuBuilder!(context),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
     Overlay.of(context, rootOverlay: true, debugRequiredFor: debugRequiredFor)
         .insert(toolbar!);
 
@@ -750,6 +810,10 @@ class _EditorTextSelectionGestureDetectorState
   // The down handler is force-run on success of a single tap and optimistically
   // run before a long press success.
   void _handleTapDown(TapDownDetails details) {
+    //### Added for Alignwith
+    selectionOffsetStart = details.globalPosition;
+    selectionOffsetEnd = details.globalPosition;
+
     widget.onTapDown?.call(details);
 
     // This isn't detected as a double tap gesture in the gesture recognizer
@@ -815,6 +879,7 @@ class _EditorTextSelectionGestureDetectorState
   Timer? _dragUpdateThrottleTimer;
 
   void _handleDragStart(DragStartDetails details) {
+    selectionOffsetStart = details.globalPosition;
     assert(_lastDragStartDetails == null);
     _lastDragStartDetails = details;
     widget.onDragSelectionStart?.call(details);
@@ -822,6 +887,7 @@ class _EditorTextSelectionGestureDetectorState
 
   void _handleDragUpdate(DragUpdateDetails details) {
     _lastDragUpdateDetails = details;
+    selectionOffsetEnd = details.globalPosition;
     _dragUpdateThrottleTimer ??= Timer(
       const Duration(milliseconds: 50),
       _handleDragUpdateThrottled,
