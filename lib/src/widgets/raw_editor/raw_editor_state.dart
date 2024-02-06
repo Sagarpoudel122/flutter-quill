@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui hide TextStyle;
 
 import 'package:collection/collection.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
@@ -22,7 +22,6 @@ import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart'
 import 'package:html/parser.dart' as html_parser;
 import 'package:super_clipboard/super_clipboard.dart';
 
-import '../../../quill_delta.dart';
 import '../../models/documents/attribute.dart';
 import '../../models/documents/document.dart';
 import '../../models/documents/nodes/block.dart';
@@ -98,7 +97,7 @@ class QuillRawEditorState extends EditorState
   String get pastePlainText => _pastePlainText;
   String _pastePlainText = '';
 
-  final ClipboardStatusNotifier _clipboardStatus = ClipboardStatusNotifier();
+  ClipboardStatusNotifier? _clipboardStatus;
   final LayerLink _toolbarLayerLink = LayerLink();
   final LayerLink _startHandleLayerLink = LayerLink();
   final LayerLink _endHandleLayerLink = LayerLink();
@@ -211,7 +210,6 @@ class QuillRawEditorState extends EditorState
     final clipboard = SystemClipboard.instance;
 
     if (clipboard != null) {
-      // TODO: Bug, Doesn't replace the selected text, it just add a new one
       final reader = await clipboard.read();
       if (reader.canProvide(Formats.htmlText)) {
         final html = await reader.readValue(Formats.htmlText);
@@ -221,22 +219,11 @@ class QuillRawEditorState extends EditorState
         final htmlBody = html_parser.parse(html).body?.outerHtml;
         final deltaFromClipboard = Document.fromHtml(htmlBody ?? html);
 
-        var newDelta = Delta();
-        newDelta = newDelta.compose(deltaFromClipboard);
-        if (!controller.document.isEmpty()) {
-          newDelta = newDelta.compose(controller.document.toDelta());
-        }
-
-        controller
-          ..setContents(
-            newDelta,
-          )
-          ..updateSelection(
-            TextSelection.collapsed(
-              offset: controller.document.length,
-            ),
-            ChangeSource.local,
-          );
+        controller.replaceText(
+            textEditingValue.selection.start,
+            textEditingValue.selection.end - textEditingValue.selection.start,
+            deltaFromClipboard,
+            TextSelection.collapsed(offset: textEditingValue.selection.end));
 
         bringIntoView(textEditingValue.selection.extent);
 
@@ -331,7 +318,8 @@ class QuillRawEditorState extends EditorState
   /// Copied from [EditableTextState].
   List<ContextMenuButtonItem> get contextMenuButtonItems {
     return EditableText.getEditableButtonItems(
-      clipboardStatus: _clipboardStatus.value,
+      clipboardStatus:
+          (_clipboardStatus != null) ? _clipboardStatus!.value : null,
       onCopy: copyEnabled
           ? () => copySelection(SelectionChangedCause.toolbar)
           : null,
@@ -533,6 +521,16 @@ class QuillRawEditorState extends EditorState
         ),
       ),
     );
+
+    if (!widget.configurations.disableClipboard) {
+      // Web - esp Safari Mac/iOS has security measures in place that restrict
+      // cliboard status checks w/o direct user interaction. Initializing the
+      // ClipboardStatusNotifier with a default value of unknown will cause the
+      // clipboard status to be checked w/o user interaction which fails. Default
+      // to pasteable for web.
+      _clipboardStatus = ClipboardStatusNotifier(
+          value: kIsWeb ? ClipboardStatus.pasteable : ClipboardStatus.unknown);
+    }
 
     if (widget.configurations.scrollable) {
       /// Since [SingleChildScrollView] does not implement
@@ -1128,8 +1126,9 @@ class QuillRawEditorState extends EditorState
   @override
   void initState() {
     super.initState();
-
-    _clipboardStatus.addListener(_onChangedClipboardStatus);
+    if (_clipboardStatus != null) {
+      _clipboardStatus!.addListener(_onChangedClipboardStatus);
+    }
 
     controller.addListener(_didChangeTextEditingValueListener);
 
@@ -1283,9 +1282,11 @@ class QuillRawEditorState extends EditorState
     controller.removeListener(_didChangeTextEditingValueListener);
     widget.configurations.focusNode.removeListener(_handleFocusChanged);
     _cursorCont.dispose();
-    _clipboardStatus
-      ..removeListener(_onChangedClipboardStatus)
-      ..dispose();
+    if (_clipboardStatus != null) {
+      _clipboardStatus!
+        ..removeListener(_onChangedClipboardStatus)
+        ..dispose();
+    }
     super.dispose();
   }
 
