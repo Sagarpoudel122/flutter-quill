@@ -14,7 +14,7 @@ import 'package:flutter/services.dart'
         ClipboardData,
         HardwareKeyboard,
         LogicalKeyboardKey,
-        RawKeyDownEvent,
+        KeyDownEvent,
         SystemChannels,
         TextInputControl;
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart'
@@ -23,6 +23,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:super_clipboard/super_clipboard.dart';
 
 import '../../models/documents/attribute.dart';
+import '../../models/documents/delta_x.dart';
 import '../../models/documents/document.dart';
 import '../../models/documents/nodes/block.dart';
 import '../../models/documents/nodes/embeddable.dart';
@@ -52,6 +53,7 @@ import 'raw_editor_render_object.dart';
 import 'raw_editor_state_selection_delegate_mixin.dart';
 import 'raw_editor_state_text_input_client_mixin.dart';
 import 'raw_editor_text_boundaries.dart';
+import 'scribble_focusable.dart';
 
 class QuillRawEditorState extends EditorState
     with
@@ -133,6 +135,7 @@ class QuillRawEditorState extends EditorState
 
     if (cause == SelectionChangedCause.toolbar) {
       bringIntoView(textEditingValue.selection.extent);
+      hideToolbar();
 
       // Collapse the selection and hide the toolbar and handles.
       userUpdateTextEditingValue(
@@ -217,13 +220,14 @@ class QuillRawEditorState extends EditorState
           return;
         }
         final htmlBody = html_parser.parse(html).body?.outerHtml;
-        final deltaFromClipboard = Document.fromHtml(htmlBody ?? html);
+        final deltaFromClipboard = DeltaX.fromHtml(htmlBody ?? html);
 
         controller.replaceText(
-            textEditingValue.selection.start,
-            textEditingValue.selection.end - textEditingValue.selection.start,
-            deltaFromClipboard,
-            TextSelection.collapsed(offset: textEditingValue.selection.end));
+          textEditingValue.selection.start,
+          textEditingValue.selection.end - textEditingValue.selection.start,
+          deltaFromClipboard,
+          TextSelection.collapsed(offset: textEditingValue.selection.end),
+        );
 
         bringIntoView(textEditingValue.selection.extent);
 
@@ -479,6 +483,24 @@ class QuillRawEditorState extends EditorState
     }
   }
 
+  Widget _scribbleFocusable(Widget child) {
+    return ScribbleFocusable(
+      editorKey: _editorKey,
+      enabled: widget.configurations.enableScribble &&
+          !widget.configurations.readOnly,
+      renderBoxForBounds: () => context
+          .findAncestorStateOfType<QuillEditorState>()
+          ?.context
+          .findRenderObject() as RenderBox?,
+      onScribbleFocus: (offset) {
+        widget.configurations.focusNode.requestFocus();
+        widget.configurations.onScribbleActivated?.call();
+      },
+      scribbleAreaInsets: widget.configurations.scribbleAreaInsets,
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     assert(debugCheckHasMediaQuery(context));
@@ -494,44 +516,20 @@ class QuillRawEditorState extends EditorState
       );
     }
 
-    Widget child = CompositedTransformTarget(
-      link: _toolbarLayerLink,
-      child: Semantics(
-        child: MouseRegion(
-          cursor: SystemMouseCursors.text,
-          child: QuilRawEditorMultiChildRenderObject(
-            key: _editorKey,
-            document: doc,
-            selection: controller.selection,
-            hasFocus: _hasFocus,
-            scrollable: widget.configurations.scrollable,
-            cursorController: _cursorCont,
-            textDirection: _textDirection,
-            startHandleLayerLink: _startHandleLayerLink,
-            endHandleLayerLink: _endHandleLayerLink,
-            onSelectionChanged: _handleSelectionChanged,
-            onSelectionCompleted: _handleSelectionCompleted,
-            scrollBottomInset: widget.configurations.scrollBottomInset,
-            padding: widget.configurations.padding,
-            maxContentWidth: widget.configurations.maxContentWidth,
-            floatingCursorDisabled:
-                widget.configurations.floatingCursorDisabled,
-            children: _buildChildren(doc, context),
-          ),
-        ),
-      ),
-    );
-
     if (!widget.configurations.disableClipboard) {
       // Web - esp Safari Mac/iOS has security measures in place that restrict
       // cliboard status checks w/o direct user interaction. Initializing the
       // ClipboardStatusNotifier with a default value of unknown will cause the
       // clipboard status to be checked w/o user interaction which fails. Default
       // to pasteable for web.
-      _clipboardStatus = ClipboardStatusNotifier(
-          value: kIsWeb ? ClipboardStatus.pasteable : ClipboardStatus.unknown);
+      if (kIsWeb) {
+        _clipboardStatus = ClipboardStatusNotifier(
+          value: ClipboardStatus.pasteable,
+        );
+      }
     }
 
+    Widget child;
     if (widget.configurations.scrollable) {
       /// Since [SingleChildScrollView] does not implement
       /// `computeDistanceToActualBaseline` it prevents the editor from
@@ -544,20 +542,53 @@ class QuillRawEditorState extends EditorState
       child = BaselineProxy(
         textStyle: _styles!.paragraph!.style,
         padding: baselinePadding,
-        child: QuillSingleChildScrollView(
-          controller: _scrollController,
-          physics: widget.configurations.scrollPhysics,
-          viewportBuilder: (_, offset) => CompositedTransformTarget(
-            link: _toolbarLayerLink,
+        child: _scribbleFocusable(
+          QuillSingleChildScrollView(
+            controller: _scrollController,
+            physics: widget.configurations.scrollPhysics,
+            viewportBuilder: (_, offset) => CompositedTransformTarget(
+              link: _toolbarLayerLink,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.text,
+                child: QuilRawEditorMultiChildRenderObject(
+                  key: _editorKey,
+                  offset: offset,
+                  document: doc,
+                  selection: controller.selection,
+                  hasFocus: _hasFocus,
+                  scrollable: widget.configurations.scrollable,
+                  textDirection: _textDirection,
+                  startHandleLayerLink: _startHandleLayerLink,
+                  endHandleLayerLink: _endHandleLayerLink,
+                  onSelectionChanged: _handleSelectionChanged,
+                  onSelectionCompleted: _handleSelectionCompleted,
+                  scrollBottomInset: widget.configurations.scrollBottomInset,
+                  padding: widget.configurations.padding,
+                  maxContentWidth: widget.configurations.maxContentWidth,
+                  cursorController: _cursorCont,
+                  floatingCursorDisabled:
+                      widget.configurations.floatingCursorDisabled,
+                  children: _buildChildren(doc, context),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    } else {
+      child = _scribbleFocusable(
+        CompositedTransformTarget(
+          link: _toolbarLayerLink,
+          child: Semantics(
             child: MouseRegion(
               cursor: SystemMouseCursors.text,
               child: QuilRawEditorMultiChildRenderObject(
                 key: _editorKey,
-                offset: offset,
                 document: doc,
                 selection: controller.selection,
                 hasFocus: _hasFocus,
                 scrollable: widget.configurations.scrollable,
+                cursorController: _cursorCont,
                 textDirection: _textDirection,
                 startHandleLayerLink: _startHandleLayerLink,
                 endHandleLayerLink: _endHandleLayerLink,
@@ -566,7 +597,6 @@ class QuillRawEditorState extends EditorState
                 scrollBottomInset: widget.configurations.scrollBottomInset,
                 padding: widget.configurations.padding,
                 maxContentWidth: widget.configurations.maxContentWidth,
-                cursorController: _cursorCont,
                 floatingCursorDisabled:
                     widget.configurations.floatingCursorDisabled,
                 children: _buildChildren(doc, context),
@@ -754,7 +784,7 @@ class QuillRawEditorState extends EditorState
             }),
             child: Focus(
               focusNode: widget.configurations.focusNode,
-              onKey: _onKey,
+              onKeyEvent: _onKeyEvent,
               child: QuillKeyboardListener(
                 child: Container(
                   constraints: constraints,
@@ -768,13 +798,15 @@ class QuillRawEditorState extends EditorState
     );
   }
 
-  KeyEventResult _onKey(node, RawKeyEvent event) {
+  KeyEventResult _onKeyEvent(node, KeyEvent event) {
     // Don't handle key if there is a meta key pressed.
-    if (event.isAltPressed || event.isControlPressed || event.isMetaPressed) {
+    if (HardwareKeyboard.instance.isAltPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed) {
       return KeyEventResult.ignored;
     }
 
-    if (event is! RawKeyDownEvent) {
+    if (event is! KeyDownEvent) {
       return KeyEventResult.ignored;
     }
     // Handle indenting blocks when pressing the tab key.
@@ -796,7 +828,7 @@ class QuillRawEditorState extends EditorState
     return KeyEventResult.ignored;
   }
 
-  KeyEventResult _handleSpaceKey(RawKeyEvent event) {
+  KeyEventResult _handleSpaceKey(KeyEvent event) {
     final child =
         controller.document.queryChild(controller.selection.baseOffset);
     if (child.node == null) {
@@ -827,7 +859,7 @@ class QuillRawEditorState extends EditorState
     return KeyEventResult.handled;
   }
 
-  KeyEventResult _handleTabKey(RawKeyEvent event) {
+  KeyEventResult _handleTabKey(KeyEvent event) {
     final child =
         controller.document.queryChild(controller.selection.baseOffset);
 
@@ -848,7 +880,7 @@ class QuillRawEditorState extends EditorState
       if (parentBlock.style.containsKey(Attribute.ol.key) ||
           parentBlock.style.containsKey(Attribute.ul.key) ||
           parentBlock.style.containsKey(Attribute.checked.key)) {
-        controller.indentSelection(!event.isShiftPressed);
+        controller.indentSelection(!HardwareKeyboard.instance.isShiftPressed);
       }
       return KeyEventResult.handled;
     }
@@ -877,7 +909,7 @@ class QuillRawEditorState extends EditorState
           controller.selection.base.offset > node.documentOffset) {
         return insertTabCharacter();
       }
-      controller.indentSelection(!event.isShiftPressed);
+      controller.indentSelection(!HardwareKeyboard.instance.isShiftPressed);
       return KeyEventResult.handled;
     }
 
