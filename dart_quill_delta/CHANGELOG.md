@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## 9.3.1
+* Require Flutter 3.19.0 as minimum version
+
+## 9.3.0
+* **Breaking change**: `Document.fromHtml(html)` is now returns `Document` instead of `Delta`, use `DeltaX.fromHtml` to return `Delta`
+* Update old deprecated api from Flutter 3.19
+* Scribble scroll fix by @mtallenca in https://github.com/singerdmx/flutter-quill/pull/1745
+
+## 9.2.14
+* feat: move cursor after inserting video/image
+* Apple pencil
+
+## 9.2.13
+* Fix crash with inserting text from contextMenuButtonItems
+* Fix incorrect behaviour of context menu 
+* fix: selection handles behaviour and unnessesary style assert
+* Update quill_fr.arb
+
+## 9.2.12
+* Fix safari clipboard bug
+* Add the option to disable clipboard functionality
+
+## 9.2.11
+* Fix a bug where it has problems with pasting text into the editor when the clipboard has styled text
+
 ## 9.2.10
 * Update example screenshots
 * Refactor `Container` to `QuillContainer` with backward compatibility
