@@ -385,8 +385,9 @@ class _TextLineState extends State<TextLine> {
     final isLink = nodeStyle.containsKey(Attribute.link.key) &&
         nodeStyle.attributes[Attribute.link.key]!.value != null;
 
+    final style = _getInlineTextStyle(
+        textNode, defaultStyles, nodeStyle, lineStyle, isLink);
     final recognizer = _getRecognizer(node, isLink);
-
     final textSpans = <InlineSpan>[];
     if (isLink || widget.readOnly) {
       return [
@@ -602,7 +603,6 @@ class _TextLineState extends State<TextLine> {
         _tapLink(link);
         break;
       case LinkMenuAction.copy:
-        // ignore: unawaited_futures
         Clipboard.setData(ClipboardData(text: link));
         break;
       case LinkMenuAction.remove:
